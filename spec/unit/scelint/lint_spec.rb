@@ -104,4 +104,87 @@ RSpec.describe Scelint::Lint do
       expect(lint.notes.count).to eq(total_notes)
     end
   end
+
+  # broken_module_00 contains a check whose value is an array instead of a
+  # hash (a `ces` key deleted by mistake, leaving the list directly under
+  # the check id).  compliance_engine raises when merging it, which used to
+  # abort the entire lint run before any errors were reported.  It is kept
+  # out of the test_module_* glob above because merging it poisons Hiera
+  # validation for every other module's profiles when linted together.
+  context 'validating a module with an unmergeable check' do
+    subject(:lint) { described_class.new([broken_module]) }
+
+    let(:broken_module) do
+      File.join(File.expand_path('../../fixtures', __dir__), 'modules', 'broken_module_00')
+    end
+
+    it 'initializes' do
+      expect(lint).to be_instance_of(described_class)
+    end
+
+    it 'reports the file and check that are malformed' do
+      expect(lint.errors).to include(match(%r{checks\.yaml \(check 'broken_00_check'\): contains something other than a hash}))
+    end
+
+    it 'reports the check that cannot be merged' do
+      expect(lint.errors).to include(match(%r{\Amerged data: unable to merge check 'broken_00_check'}))
+    end
+
+    it 'reports the profile whose Hiera data cannot be rendered' do
+      expect(lint.errors).to include(match(%r{\AProfile 'broken_00_profile': unable to render Hiera data}))
+    end
+
+    it 'reports nothing else' do
+      expect(lint.errors.count).to eq(3)
+      expect(lint.warnings).to be_empty
+      expect(lint.notes).to be_empty
+    end
+  end
+
+  # Each of these modules has one malformed shape that used to crash the run,
+  # or to be reported only as warnings.  The first pattern is the error that
+  # names the offending data; every module must report at least that, and
+  # nothing may escape as an exception.
+  {
+    '01' => [%r{ces\.yaml: 'ce' must be a hash, got Array}],
+    '02' => [%r{profile\.yaml: 'profiles' must be a hash, got Array}],
+    '03' => [%r{checks\.yaml: 'checks' must be a hash, got Array}],
+    '04' => [
+      %r{profile\.yaml \(profile 'broken_04_profile'\): contains something other than a hash},
+      %r{\AProfile 'broken_04_profile': unable to render Hiera data .* with facts },
+    ],
+    '05' => [%r{\Amerged data \(check 'broken_05_check'\): settings must be a hash, got String}],
+    '06' => [%r{\AProfile 'broken_06_profile': unable to render Hiera data}],
+    '07' => [%r{checks\.yaml \(check 'broken_07_check'\): malformed remediation section disabled, expecting an array}],
+  }.each do |index, expected_errors|
+    context "validating broken_module_#{index}" do
+      subject(:lint) { described_class.new([broken_module]) }
+
+      let(:broken_module) do
+        File.join(File.expand_path('../../fixtures', __dir__), 'modules', "broken_module_#{index}")
+      end
+
+      it 'reports the malformed data' do
+        expected_errors.each do |pattern|
+          expect(lint.errors).to include(match(pattern))
+        end
+      end
+    end
+  end
+
+  context 'validating broken_module_05' do
+    subject(:lint) { described_class.new([File.join(File.expand_path('../../fixtures', __dir__), 'modules', 'broken_module_05')]) }
+
+    it 'warns about the file that has a non-hash settings value' do
+      expect(lint.warnings).to include(match(%r{checks\.yaml \(check 'broken_05_check'\): settings must be a hash, got String}))
+    end
+  end
+
+  context 'validating broken_module_06' do
+    subject(:lint) { described_class.new([File.join(File.expand_path('../../fixtures', __dir__), 'modules', 'broken_module_06')]) }
+
+    it 'warns about the check that has a non-array ces value' do
+      expect(lint.warnings).to include(match(%r{checks\.yaml \(check 'broken_06_check'\): bad ces 'broken_06_ce'}))
+    end
+  end
 end

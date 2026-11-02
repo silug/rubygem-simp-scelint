@@ -1,3 +1,9 @@
+### 0.6.2 / 2026-08-31
+* Report the file and check when data cannot be merged instead of crashing
+* Report a `profiles`, `ce` or `checks` section that is not a hash, and a check's
+  `settings`, `ces` or remediation section of the wrong type, instead of crashing
+* Exit with a non-zero status when linting fails with an exception
+
 ### 0.6.1 / 2026-08-20
 * Support compliance_engine 1.x
 

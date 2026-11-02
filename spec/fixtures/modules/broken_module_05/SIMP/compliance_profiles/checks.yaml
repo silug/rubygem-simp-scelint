@@ -1,0 +1,8 @@
+---
+version: 2.0.0
+checks:
+  broken_05_check:
+    type: puppet-class-parameter
+    settings: foo
+    ces:
+      - broken_05_ce

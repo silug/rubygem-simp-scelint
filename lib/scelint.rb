@@ -337,7 +337,22 @@ module Scelint
         'benchmark_version',
       ]
 
+      unless file_data.is_a?(Hash)
+        errors << "#{file}: 'profiles' must be a hash, got #{file_data.class}"
+        return
+      end
+
       file_data.each do |profile, value|
+        if value.nil?
+          warnings << "#{file} (profile '#{profile}'): empty value"
+          next
+        end
+
+        unless value.is_a?(Hash)
+          errors << "#{file} (profile '#{profile}'): contains something other than a hash"
+          next
+        end
+
         value.each_key do |key|
           warnings << "#{file} (profile '#{profile}'): unexpected key '#{key}'" unless ok.include?(key)
         end
@@ -367,7 +382,22 @@ module Scelint
         'notes',
       ]
 
+      unless file_data.is_a?(Hash)
+        errors << "#{file}: 'ce' must be a hash, got #{file_data.class}"
+        return
+      end
+
       file_data.each do |ce, value|
+        if value.nil?
+          warnings << "#{file} (CE '#{ce}'): empty value"
+          next
+        end
+
+        unless value.is_a?(Hash)
+          errors << "#{file} (CE '#{ce}'): contains something other than a hash"
+          next
+        end
+
         value.each_key do |key|
           warnings << "#{file} (CE '#{ce}'): unexpected key '#{key}'" unless ok.include?(key)
         end
@@ -445,6 +475,11 @@ module Scelint
 
       if remediation_section.is_a?(Hash)
         remediation_section.each do |section, value|
+          if ['scan-false-positive', 'disabled', 'risk'].include?(section) && !value.is_a?(Array)
+            errors << "#{file} (check '#{check}'): malformed remediation section #{section}, expecting an array."
+            next
+          end
+
           case section
           when 'scan-false-positive', 'disabled'
             value.each do |reason|
@@ -512,6 +547,16 @@ module Scelint
         return false
       end
 
+      unless file_data.is_a?(Hash)
+        msg = "#{file} (check '#{check}'): settings must be a hash, got #{file_data.class}"
+        if file == 'merged data'
+          errors << msg
+        else
+          warnings << msg
+        end
+        return false
+      end
+
       if file_data.key?('parameter')
         check_parameter(file, check, file_data['parameter'])
       else
@@ -542,12 +587,16 @@ module Scelint
     # Check CEs in a check
     #
     # @param file [String] The path to the file being checked
+    # @param check [String] The name of the check
     # @param file_data [Array] The data to validate
-    def check_check_ces(file, file_data)
-      warnings << "#{file}: bad ces '#{file_data}'" unless file_data.is_a?(Array)
+    def check_check_ces(file, check, file_data)
+      unless file_data.is_a?(Array)
+        warnings << "#{file} (check '#{check}'): bad ces '#{file_data}'"
+        return
+      end
 
       file_data.each do |key|
-        warnings << "#{file}: bad ce '#{key}'" unless key.is_a?(String)
+        warnings << "#{file} (check '#{check}'): bad ce '#{key}'" unless key.is_a?(String)
       end
     end
 
@@ -567,6 +616,11 @@ module Scelint
         'remediation',
       ]
 
+      unless file_data.is_a?(Hash)
+        errors << "#{file}: 'checks' must be a hash, got #{file_data.class}"
+        return
+      end
+
       file_data.each do |check, value|
         if value.nil?
           warnings << "#{file} (check '#{check}'): empty value"
@@ -579,6 +633,7 @@ module Scelint
           end
         else
           errors << "#{file} (check '#{check}'): contains something other than a hash, this is most likely caused by a missing note or ce element under the check"
+          next
         end
 
         check_type(file, check, value['type']) if value['type'] || file == 'merged data'
@@ -589,7 +644,7 @@ module Scelint
         check_controls(file, value['controls']) unless value['controls'].nil?
         check_identifiers(file, value['identifiers']) unless value['identifiers'].nil?
         check_oval_ids(file, value['oval-ids']) unless value['oval-ids'].nil?
-        check_check_ces(file, value['ces']) unless value['ces'].nil?
+        check_check_ces(file, check, value['ces']) unless value['ces'].nil?
         check_confine(file, value['confine']) unless value['confine'].nil?
       end
     end
@@ -672,7 +727,12 @@ module Scelint
 
       # Unconfined, verify that hiera data exists
       data.profiles.each_key do |profile|
-        hiera = data.hiera([profile])
+        begin
+          hiera = data.hiera([profile])
+        rescue => e
+          errors << "Profile '#{profile}': unable to render Hiera data (#{e.message})"
+          next
+        end
         if hiera.nil?
           errors << "Profile '#{profile}': Invalid Hiera data (returned nil)"
           next
@@ -687,8 +747,20 @@ module Scelint
       # Again, this time confined
       confines.each do |confine|
         data.facts = confine
-        data.profiles.select { |_, value| value.ces&.count&.positive? || value.controls&.count&.positive? }.each_key do |profile|
-          hiera = data.hiera([profile])
+        eligible = data.profiles.select do |profile, value|
+          value.ces&.count&.positive? || value.controls&.count&.positive?
+        rescue => e
+          errors << "Profile '#{profile}': unable to render Hiera data (#{e.message}) with facts #{confine}"
+          false
+        end
+
+        eligible.each_key do |profile|
+          begin
+            hiera = data.hiera([profile])
+          rescue => e
+            errors << "Profile '#{profile}': unable to render Hiera data (#{e.message}) with facts #{confine}"
+            next
+          end
           if hiera.nil?
             errors << "Profile '#{profile}': Invalid Hiera data (returned nil) with facts #{confine}"
             next
@@ -728,18 +800,27 @@ module Scelint
 
     # Merge a ComplianceEngine::Collection object into a Hash
     #
+    # Components that cannot be merged (usually because a fragment is
+    # malformed) are reported as errors and left out of the result rather
+    # than aborting the entire lint run.
+    #
     # @param collection [ComplianceEngine::Collection] A collection object
+    # @param type [String] The type of component in the collection, used in error messages
     # @return [Hash] The merged data
-    def merge(collection)
-      collection.to_h.reduce({}) { |result, value| result.merge!(value[0] => value[1].to_h) }
+    def merge(collection, type)
+      collection.to_h.each_with_object({}) do |(key, value), result|
+        result[key] = value.to_h
+      rescue => e
+        errors << "merged data: unable to merge #{type} '#{key}': #{e.message}"
+      end
     end
 
     # Perform lint checks on merged data
     def merged_data_lint
-      check_profiles('merged data', merge(data.profiles))
-      check_ce('merged data', merge(data.ces))
-      check_checks('merged data', merge(data.checks))
-      check_controls('merged data', merge(data.controls))
+      check_profiles('merged data', merge(data.profiles, 'profile'))
+      check_ce('merged data', merge(data.ces, 'CE'))
+      check_checks('merged data', merge(data.checks, 'check'))
+      check_controls('merged data', merge(data.controls, 'control'))
     end
   end
 end

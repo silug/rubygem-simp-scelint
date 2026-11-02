@@ -1,0 +1,6 @@
+---
+version: 2.0.0
+profiles:
+  broken_06_profile:
+    ces:
+      broken_06_ce: true
