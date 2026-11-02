@@ -140,4 +140,51 @@ RSpec.describe Scelint::Lint do
       expect(lint.notes).to be_empty
     end
   end
+
+  # Each of these modules has one malformed shape that used to crash the run,
+  # or to be reported only as warnings.  The first pattern is the error that
+  # names the offending data; every module must report at least that, and
+  # nothing may escape as an exception.
+  {
+    '01' => [%r{ces\.yaml: 'ce' must be a hash, got Array}],
+    '02' => [%r{profile\.yaml: 'profiles' must be a hash, got Array}],
+    '03' => [%r{checks\.yaml: 'checks' must be a hash, got Array}],
+    '04' => [
+      %r{profile\.yaml \(profile 'broken_04_profile'\): contains something other than a hash},
+      %r{\AProfile 'broken_04_profile': unable to render Hiera data .* with facts },
+    ],
+    '05' => [%r{\Amerged data \(check 'broken_05_check'\): settings must be a hash, got String}],
+    '06' => [%r{\AProfile 'broken_06_profile': unable to render Hiera data}],
+    '07' => [%r{checks\.yaml \(check 'broken_07_check'\): malformed remediation section disabled, expecting an array}],
+  }.each do |index, expected_errors|
+    context "validating broken_module_#{index}" do
+      subject(:lint) { described_class.new([broken_module]) }
+
+      let(:broken_module) do
+        File.join(File.expand_path('../../fixtures', __dir__), 'modules', "broken_module_#{index}")
+      end
+
+      it 'reports the malformed data' do
+        expected_errors.each do |pattern|
+          expect(lint.errors).to include(match(pattern))
+        end
+      end
+    end
+  end
+
+  context 'validating broken_module_05' do
+    subject(:lint) { described_class.new([File.join(File.expand_path('../../fixtures', __dir__), 'modules', 'broken_module_05')]) }
+
+    it 'warns about the file that has a non-hash settings value' do
+      expect(lint.warnings).to include(match(%r{checks\.yaml \(check 'broken_05_check'\): settings must be a hash, got String}))
+    end
+  end
+
+  context 'validating broken_module_06' do
+    subject(:lint) { described_class.new([File.join(File.expand_path('../../fixtures', __dir__), 'modules', 'broken_module_06')]) }
+
+    it 'warns about the check that has a non-array ces value' do
+      expect(lint.warnings).to include(match(%r{checks\.yaml \(check 'broken_06_check'\): bad ces 'broken_06_ce'}))
+    end
+  end
 end

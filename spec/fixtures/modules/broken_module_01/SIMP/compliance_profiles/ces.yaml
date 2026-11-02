@@ -1,0 +1,5 @@
+---
+version: 2.0.0
+ce:
+  - broken_01_ce
+  - broken_01_other_ce

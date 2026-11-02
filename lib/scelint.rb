@@ -337,6 +337,11 @@ module Scelint
         'benchmark_version',
       ]
 
+      unless file_data.is_a?(Hash)
+        errors << "#{file}: 'profiles' must be a hash, got #{file_data.class}"
+        return
+      end
+
       file_data.each do |profile, value|
         if value.nil?
           warnings << "#{file} (profile '#{profile}'): empty value"
@@ -376,6 +381,11 @@ module Scelint
         'imported_data',
         'notes',
       ]
+
+      unless file_data.is_a?(Hash)
+        errors << "#{file}: 'ce' must be a hash, got #{file_data.class}"
+        return
+      end
 
       file_data.each do |ce, value|
         if value.nil?
@@ -465,6 +475,11 @@ module Scelint
 
       if remediation_section.is_a?(Hash)
         remediation_section.each do |section, value|
+          if ['scan-false-positive', 'disabled', 'risk'].include?(section) && !value.is_a?(Array)
+            errors << "#{file} (check '#{check}'): malformed remediation section #{section}, expecting an array."
+            next
+          end
+
           case section
           when 'scan-false-positive', 'disabled'
             value.each do |reason|
@@ -532,6 +547,16 @@ module Scelint
         return false
       end
 
+      unless file_data.is_a?(Hash)
+        msg = "#{file} (check '#{check}'): settings must be a hash, got #{file_data.class}"
+        if file == 'merged data'
+          errors << msg
+        else
+          warnings << msg
+        end
+        return false
+      end
+
       if file_data.key?('parameter')
         check_parameter(file, check, file_data['parameter'])
       else
@@ -562,12 +587,16 @@ module Scelint
     # Check CEs in a check
     #
     # @param file [String] The path to the file being checked
+    # @param check [String] The name of the check
     # @param file_data [Array] The data to validate
-    def check_check_ces(file, file_data)
-      warnings << "#{file}: bad ces '#{file_data}'" unless file_data.is_a?(Array)
+    def check_check_ces(file, check, file_data)
+      unless file_data.is_a?(Array)
+        warnings << "#{file} (check '#{check}'): bad ces '#{file_data}'"
+        return
+      end
 
       file_data.each do |key|
-        warnings << "#{file}: bad ce '#{key}'" unless key.is_a?(String)
+        warnings << "#{file} (check '#{check}'): bad ce '#{key}'" unless key.is_a?(String)
       end
     end
 
@@ -586,6 +615,11 @@ module Scelint
         'confine',
         'remediation',
       ]
+
+      unless file_data.is_a?(Hash)
+        errors << "#{file}: 'checks' must be a hash, got #{file_data.class}"
+        return
+      end
 
       file_data.each do |check, value|
         if value.nil?
@@ -610,7 +644,7 @@ module Scelint
         check_controls(file, value['controls']) unless value['controls'].nil?
         check_identifiers(file, value['identifiers']) unless value['identifiers'].nil?
         check_oval_ids(file, value['oval-ids']) unless value['oval-ids'].nil?
-        check_check_ces(file, value['ces']) unless value['ces'].nil?
+        check_check_ces(file, check, value['ces']) unless value['ces'].nil?
         check_confine(file, value['confine']) unless value['confine'].nil?
       end
     end
@@ -713,7 +747,14 @@ module Scelint
       # Again, this time confined
       confines.each do |confine|
         data.facts = confine
-        data.profiles.select { |_, value| value.ces&.count&.positive? || value.controls&.count&.positive? }.each_key do |profile|
+        eligible = data.profiles.select do |profile, value|
+          value.ces&.count&.positive? || value.controls&.count&.positive?
+        rescue => e
+          errors << "Profile '#{profile}': unable to render Hiera data (#{e.message}) with facts #{confine}"
+          false
+        end
+
+        eligible.each_key do |profile|
           begin
             hiera = data.hiera([profile])
           rescue => e

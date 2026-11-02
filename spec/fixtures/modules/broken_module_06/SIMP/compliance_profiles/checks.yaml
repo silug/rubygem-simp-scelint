@@ -1,0 +1,9 @@
+---
+version: 2.0.0
+checks:
+  broken_06_check:
+    type: puppet-class-parameter
+    settings:
+      parameter: broken_06::param
+      value: true
+    ces: broken_06_ce

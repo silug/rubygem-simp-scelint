@@ -78,6 +78,14 @@ RSpec.describe Scelint::CLI do
       end
     end
 
+    ['01', '02', '03', '04', '05', '06', '07'].each do |index|
+      context "when linting malformed data (broken_module_#{index})" do
+        it 'exits 1' do
+          expect(run_cli([File.join(fixtures_dir, "broken_module_#{index}")])).to eq(1)
+        end
+      end
+    end
+
     context 'when linting raises an exception' do
       before(:each) do
         allow(Scelint::Lint).to receive(:new).and_raise(StandardError, 'boom')

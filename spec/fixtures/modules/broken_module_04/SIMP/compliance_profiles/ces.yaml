@@ -1,0 +1,7 @@
+---
+version: 2.0.0
+ce:
+  broken_04_ce:
+    title: broken_04 CE
+    confine:
+      os.family: RedHat

@@ -1,0 +1,5 @@
+---
+version: 2.0.0
+profiles:
+  broken_04_profile:
+    - broken_04_ce

@@ -1,0 +1,12 @@
+---
+version: 2.0.0
+checks:
+  broken_07_check:
+    type: puppet-class-parameter
+    settings:
+      parameter: broken_07::param
+      value: true
+    ces:
+      - broken_07_ce
+    remediation:
+      disabled: nope
